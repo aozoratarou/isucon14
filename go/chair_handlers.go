@@ -147,7 +147,18 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				//キャッシュにデータ追加
-				c.Set(ride.ID,  "PICKUP", cache.DefaultExpiration)
+				c.Set(ride.ID, "PICKUP", cache.DefaultExpiration)
+
+				// イベント発行
+				i, _ := c.Get("ride:" + ride.ID)
+				rideInfo := i.(*rideInfo)
+				chairChannel[chair.ID] <- chairEvent{
+					RideID:                rideInfo.RideID,
+					User:                  rideInfo.User,
+					PickupCoordinate:      rideInfo.PickupCoordinate,
+					DestinationCoordinate: rideInfo.DestinationCoordinate,
+					Status:                "PICKUP",
+				}
 			}
 
 			if req.Latitude == ride.DestinationLatitude && req.Longitude == ride.DestinationLongitude && status == "CARRYING" {
@@ -156,7 +167,18 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				//キャッシュにデータ追加
-				c.Set(ride.ID,  "ARRIVED", cache.DefaultExpiration)
+				c.Set(ride.ID, "ARRIVED", cache.DefaultExpiration)
+
+				// イベント発行
+				i, _ := c.Get("ride:" + ride.ID)
+				rideInfo := i.(*rideInfo)
+				chairChannel[chair.ID] <- chairEvent{
+					RideID:                rideInfo.RideID,
+					User:                  rideInfo.User,
+					PickupCoordinate:      rideInfo.PickupCoordinate,
+					DestinationCoordinate: rideInfo.DestinationCoordinate,
+					Status:                "ARRIVED",
+				}
 			}
 		}
 	}
@@ -189,6 +211,21 @@ type chairGetNotificationResponseData struct {
 	Status                string     `json:"status"`
 }
 
+type chairEvent struct {
+	RideID                string     `json:"ride_id"`
+	User                  simpleUser `json:"user"`
+	PickupCoordinate      Coordinate `json:"pickup_coordinate"`
+	DestinationCoordinate Coordinate `json:"destination_coordinate"`
+	Status                string     `json:"status"`
+}
+
+var (
+	subscribe   = make(chan chan chairEvent)
+	unsubscribe = make(chan chan chairEvent)
+)
+
+var chairChannel = make(map[string]chan chairEvent)
+
 func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	chair := ctx.Value("chair").(*Chair)
@@ -203,6 +240,17 @@ func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 	yetSentRideStatus := RideStatus{}
 	status := ""
 
+	// w.Header().Set("Content-Type", "text/event-stream")
+	// ch := chairChannel[chair.ID]
+	// subscribe <- ch
+	// log.Printf("connect from: %v", r.RemoteAddr)
+
+	// defer func() {
+	// 	unsubscribe <- ch
+	// 	log.Printf("disconnect from: %v", r.RemoteAddr)
+	// }()
+
+	// char_idに紐づく最新のrideを取得
 	if err := tx.GetContext(ctx, ride, `SELECT * FROM rides WHERE chair_id = ? ORDER BY updated_at DESC LIMIT 1`, chair.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusOK, &chairGetNotificationResponse{
@@ -214,7 +262,26 @@ func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := tx.GetContext(ctx, &yetSentRideStatus, `SELECT * FROM ride_statuses WHERE ride_id = ? AND chair_sent_at IS NULL ORDER BY created_at ASC LIMIT 1`, ride.ID); err != nil {
+	// 乗車中のユーザー情報を取得
+	user := &User{}
+	err = tx.GetContext(ctx, user, "SELECT * FROM users WHERE id = ? FOR SHARE", ride.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	// ride_idに紐づくステータスのうち未送信のものを取得
+	if err := tx.GetContext(ctx, &yetSentRideStatus, `
+		SELECT
+			*
+		FROM
+			ride_statuses
+		WHERE
+			ride_id = ?
+			AND chair_sent_at IS NULL
+		ORDER BY
+			created_at ASC`,
+		ride.ID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			status, err = getLatestRideStatus(ctx, tx, ride.ID)
 			if err != nil {
@@ -229,13 +296,7 @@ func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 		status = yetSentRideStatus.Status
 	}
 
-	user := &User{}
-	err = tx.GetContext(ctx, user, "SELECT * FROM users WHERE id = ? FOR SHARE", ride.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
+	// 未送信のステータスがある場合、chair_sent_atを更新
 	if yetSentRideStatus.ID != "" {
 		_, err := tx.ExecContext(ctx, `UPDATE ride_statuses SET chair_sent_at = CURRENT_TIMESTAMP(6) WHERE id = ?`, yetSentRideStatus.ID)
 		if err != nil {
@@ -315,7 +376,18 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		c.Set(rideID,  "ENROUTE", cache.DefaultExpiration)
+		c.Set(rideID, "ENROUTE", cache.DefaultExpiration)
+
+		// イベント発行
+		i, _ := c.Get("ride:" + ride.ID)
+		rideInfo := i.(*rideInfo)
+		chairChannel[chair.ID] <- chairEvent{
+			RideID:                rideInfo.RideID,
+			User:                  rideInfo.User,
+			PickupCoordinate:      rideInfo.PickupCoordinate,
+			DestinationCoordinate: rideInfo.DestinationCoordinate,
+			Status:                "ENROUTE",
+		}
 	// After Picking up user
 	case "CARRYING":
 		status, err := getLatestRideStatus(ctx, tx, ride.ID)
@@ -331,7 +403,18 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
-		c.Set(rideID,  "CARRYING", cache.DefaultExpiration)
+		c.Set(rideID, "CARRYING", cache.DefaultExpiration)
+
+		// イベント発行
+		i, _ := c.Get("ride:" + ride.ID)
+		rideInfo := i.(*rideInfo)
+		chairChannel[chair.ID] <- chairEvent{
+			RideID:                rideInfo.RideID,
+			User:                  rideInfo.User,
+			PickupCoordinate:      rideInfo.PickupCoordinate,
+			DestinationCoordinate: rideInfo.DestinationCoordinate,
+			Status:                "CARRYING",
+		}
 	default:
 		writeError(w, http.StatusBadRequest, errors.New("invalid status"))
 	}
