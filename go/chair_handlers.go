@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/patrickmn/go-cache"
 )
 
 type chairPostChairsRequest struct {
@@ -145,6 +146,8 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, err)
 					return
 				}
+				//キャッシュにデータ追加
+				c.Set(ride.ID,  "PICKUP", cache.DefaultExpiration)
 			}
 
 			if req.Latitude == ride.DestinationLatitude && req.Longitude == ride.DestinationLongitude && status == "CARRYING" {
@@ -152,6 +155,8 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, err)
 					return
 				}
+				//キャッシュにデータ追加
+				c.Set(ride.ID,  "ARRIVED", cache.DefaultExpiration)
 			}
 		}
 	}
@@ -310,6 +315,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		c.Set(rideID,  "ENROUTE", cache.DefaultExpiration)
 	// After Picking up user
 	case "CARRYING":
 		status, err := getLatestRideStatus(ctx, tx, ride.ID)
@@ -325,6 +331,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		c.Set(rideID,  "CARRYING", cache.DefaultExpiration)
 	default:
 		writeError(w, http.StatusBadRequest, errors.New("invalid status"))
 	}
