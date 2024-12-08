@@ -204,7 +204,7 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
        is_active,
        created_at,
        updated_at
-	FROM Chairs
+	FROM chairs
 	WHERE owner_id = ?
 	`, owner.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
