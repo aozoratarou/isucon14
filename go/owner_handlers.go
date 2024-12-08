@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"github.com/patrickmn/go-cache"
 )
 
 const (
@@ -203,39 +204,66 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
        is_active,
        created_at,
        updated_at,
-       IFNULL(total_distance, 0) AS total_distance,
-       total_distance_updated_at
-FROM chairs
-       LEFT JOIN (SELECT chair_id,
-                          SUM(IFNULL(distance, 0)) AS total_distance,
-                          MAX(created_at)          AS total_distance_updated_at
-                   FROM (SELECT chair_id,
-                                created_at,
-                                ABS(latitude - LAG(latitude) OVER (PARTITION BY chair_id ORDER BY created_at)) +
-                                ABS(longitude - LAG(longitude) OVER (PARTITION BY chair_id ORDER BY created_at)) AS distance
-                         FROM chair_locations) tmp
-                   GROUP BY chair_id) distance_table ON distance_table.chair_id = chairs.id
-WHERE owner_id = ?
-`, owner.ID); err != nil {
+	FROM Chairs
+	WHERE owner_id = ?
+	`, owner.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	res := ownerGetChairResponse{}
 	for _, chair := range chairs {
-		c := ownerGetChairResponseChair{
-			ID:            chair.ID,
-			Name:          chair.Name,
-			Model:         chair.Model,
-			Active:        chair.IsActive,
-			RegisteredAt:  chair.CreatedAt.UnixMilli(),
-			TotalDistance: chair.TotalDistance,
+		var totalDistance DistanceModel
+
+		if distance, found := c.Get(chair.ID); found {
+			distanceModel := distance.(DistanceModel)
+			c := ownerGetChairResponseChair{
+				ID:            chair.ID,
+				Name:          chair.Name,
+				Model:         chair.Model,
+				Active:        chair.IsActive,
+				RegisteredAt:  chair.CreatedAt.UnixMilli(),
+				TotalDistance: distanceModel.Distance,
+			}
+			t := distanceModel.UpdatedAt.UnixMilli()
+				c.TotalDistanceUpdatedAt = &t
+			res.Chairs = append(res.Chairs, c)
+		} else {
+			// キャッシュにない場合はSQLを使って距離を計算する
+			if err := db.SelectContext(ctx, &totalDistance, `
+				SELECT 
+					SUM(IFNULL(distance, 0)) AS total_distance,
+					total_distance_updated_at
+				FROM (
+					SELECT ABS(latitude - LAG(latitude) OVER (PARTITION BY chair_id ORDER BY created_at)) +
+						   ABS(longitude - LAG(longitude) OVER (PARTITION BY chair_id ORDER BY created_at)) AS distance
+					FROM chair_locations
+					WHERE chair_id = ?
+				) tmp
+			`, chair.ID); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			// データベースから取得した距離をキャッシュに保存
+			c.Set(chair.ID, DistanceModel{
+				Distance: totalDistance.Distance,
+				UpdatedAt: totalDistance.UpdatedAt,
+			}, cache.DefaultExpiration)
+			c := ownerGetChairResponseChair{
+				ID:            chair.ID,
+				Name:          chair.Name,
+				Model:         chair.Model,
+				Active:        chair.IsActive,
+				RegisteredAt:  chair.CreatedAt.UnixMilli(),
+				TotalDistance: chair.TotalDistance,
+			}
+			if chair.TotalDistanceUpdatedAt.Valid {
+				t := chair.TotalDistanceUpdatedAt.Time.UnixMilli()
+				c.TotalDistanceUpdatedAt = &t
+			}
+			res.Chairs = append(res.Chairs, c)
 		}
-		if chair.TotalDistanceUpdatedAt.Valid {
-			t := chair.TotalDistanceUpdatedAt.Time.UnixMilli()
-			c.TotalDistanceUpdatedAt = &t
-		}
-		res.Chairs = append(res.Chairs, c)
 	}
 	writeJSON(w, http.StatusOK, res)
 }
