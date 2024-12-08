@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/oklog/ulid/v2"
@@ -145,6 +146,8 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, err)
 					return
 				}
+
+				log.Printf("chairPostCoordinate: chair %s: ride %s: status %s", chair.ID, ride.ID, "ENROUTE")
 			}
 
 			if req.Latitude == ride.DestinationLatitude && req.Longitude == ride.DestinationLongitude && status == "CARRYING" {
@@ -152,6 +155,8 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 					writeError(w, http.StatusInternalServerError, err)
 					return
 				}
+
+				log.Printf("chairPostCoordinate: chair %s: ride %s: status %s", chair.ID, ride.ID, "ARRIVED")
 			}
 		}
 	}
@@ -244,6 +249,8 @@ func chairGetNotification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("chairGetNotification: chair %s: ride %s: status %s", chair.ID, ride.ID, status)
+
 	writeJSON(w, http.StatusOK, &chairGetNotificationResponse{
 		Data: &chairGetNotificationResponseData{
 			RideID: ride.ID,
@@ -299,6 +306,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if ride.ChairID.String != chair.ID {
+		log.Printf("chairPostCoordinate: request chair id %s: actual chair id %s", ride.ChairID.String, chair.ID)
 		writeError(w, http.StatusBadRequest, errors.New("not assigned to this ride"))
 		return
 	}
@@ -310,6 +318,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		log.Printf("chairPostCoordinate: chair %s: ride %s: status %s", chair.ID, ride.ID, "ENROUTE")
 	// After Picking up user
 	case "CARRYING":
 		status, err := getLatestRideStatus(ctx, tx, ride.ID)
@@ -325,7 +334,9 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
+		log.Printf("chairPostCoordinate: chair %s: ride %s: status %s", chair.ID, ride.ID, "CARRYING")
 	default:
+		log.Printf("chairPostCoordinate: chair %s: ride %s: invalid status %s", chair.ID, ride.ID, req.Status)
 		writeError(w, http.StatusBadRequest, errors.New("invalid status"))
 	}
 
