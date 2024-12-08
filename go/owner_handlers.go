@@ -203,8 +203,8 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
        model,
        is_active,
        created_at,
-       updated_at,
-	FROM Chairs
+       updated_at
+	FROM chairs
 	WHERE owner_id = ?
 	`, owner.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -233,10 +233,13 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
 			if err := db.SelectContext(ctx, &totalDistance, `
 				SELECT 
 					SUM(IFNULL(distance, 0)) AS total_distance,
-					total_distance_updated_at
+					MAX(created_at) AS total_distance_updated_at
 				FROM (
-					SELECT ABS(latitude - LAG(latitude) OVER (PARTITION BY chair_id ORDER BY created_at)) +
-						   ABS(longitude - LAG(longitude) OVER (PARTITION BY chair_id ORDER BY created_at)) AS distance
+					SELECT 
+						chair_id,
+						created_at,
+						ABS(latitude - LAG(latitude) OVER (PARTITION BY chair_id ORDER BY created_at)) +
+						ABS(longitude - LAG(longitude) OVER (PARTITION BY chair_id ORDER BY created_at)) AS distance
 					FROM chair_locations
 					WHERE chair_id = ?
 				) tmp
