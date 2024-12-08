@@ -135,7 +135,5 @@ CREATE TABLE coupons
 )
   COMMENT 'クーポンテーブル';
 
----
-
 CREATE INDEX ride_statuses_ride_id_IDX USING BTREE ON isuride.ride_statuses (ride_id,created_at DESC);
 CREATE INDEX ride_statuses_ride_id_IDX2 USING BTREE ON isuride.ride_statuses (ride_id,created_at,chair_sent_at);
