@@ -10,6 +10,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/oklog/ulid/v2"
+	"github.com/patrickmn/go-cache"
 )
 
 type appPostUsersRequest struct {
@@ -284,6 +285,11 @@ type executableGet interface {
 }
 
 func getLatestRideStatus(ctx context.Context, tx executableGet, rideID string) (string, error) {
+	if cachedStatus, found := c.Get(rideID); found {
+		if status, ok := cachedStatus.(string); ok {
+			return status, nil
+		}
+	}
 	status := ""
 	if err := tx.GetContext(ctx, &status, `SELECT status FROM ride_statuses WHERE ride_id = ? ORDER BY created_at DESC LIMIT 1`, rideID); err != nil {
 		return "", err
@@ -354,6 +360,9 @@ func appPostRides(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	//キャッシュにデータ追加
+	c.Set(rideID,  "MATCHING", cache.DefaultExpiration)
 
 	var rideCount int
 	if err := tx.GetContext(ctx, &rideCount, `SELECT COUNT(*) FROM rides WHERE user_id = ? `, user.ID); err != nil {
@@ -570,6 +579,9 @@ func appPostRideEvaluatation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	//キャッシュにデータ追加
+	c.Set(rideID,  "COMPLETED", cache.DefaultExpiration)
 
 	if err := tx.GetContext(ctx, ride, `SELECT * FROM rides WHERE id = ?`, rideID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
