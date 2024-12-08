@@ -10,14 +10,17 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"github.com/patrickmn/go-cache"
 )
 
 var db *sqlx.DB
+var c *cache.Cache 
 
 func main() {
 	mux := setup()
@@ -64,6 +67,9 @@ func setup() http.Handler {
 		panic(err)
 	}
 	db = _db
+
+	_c := cache.New(5*time.Minute, 10*time.Minute)
+	c = _c
 
 	mux := chi.NewRouter()
 	mux.Use(middleware.Logger)
