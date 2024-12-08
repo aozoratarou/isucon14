@@ -203,7 +203,7 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
        model,
        is_active,
        created_at,
-       updated_at,
+       updated_at
 	FROM Chairs
 	WHERE owner_id = ?
 	`, owner.ID); err != nil {
