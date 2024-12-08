@@ -335,6 +335,7 @@ func chairPostRideStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("chairPostCoordinate: chair %s: ride %s: status %s", chair.ID, ride.ID, "CARRYING")
 	default:
+		log.Printf("chairPostCoordinate: chair %s: ride %s: invalid status %s", chair.ID, ride.ID, req.Status)
 		writeError(w, http.StatusBadRequest, errors.New("invalid status"))
 	}
 
