@@ -233,7 +233,7 @@ func ownerGetChairs(w http.ResponseWriter, r *http.Request) {
 			if err := db.SelectContext(ctx, &totalDistance, `
 				SELECT 
 					SUM(IFNULL(distance, 0)) AS total_distance,
-					total_distance_updated_at
+					MAX(created_at) AS total_distance_updated_at
 				FROM (
 					SELECT ABS(latitude - LAG(latitude) OVER (PARTITION BY chair_id ORDER BY created_at)) +
 						   ABS(longitude - LAG(longitude) OVER (PARTITION BY chair_id ORDER BY created_at)) AS distance
