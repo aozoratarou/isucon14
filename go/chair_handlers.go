@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 	"github.com/patrickmn/go-cache"
@@ -95,6 +96,11 @@ type chairPostCoordinateResponse struct {
 	RecordedAt int64 `json:"recorded_at"`
 }
 
+type DistanceModel struct {
+	Distance  int `json:"distance"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	req := &Coordinate{}
@@ -120,6 +126,31 @@ func chairPostCoordinate(w http.ResponseWriter, r *http.Request) {
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+
+	var prevCoordinate ChairLocation
+	err = tx.SelectContext(ctx, &prevCoordinate, `
+		SELECT latitude, longitude, created_at
+		FROM chair_locations
+		WHERE chair_id = ?
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, chair.ID)
+
+	if err != nil {
+		// エラー発生時にもdistanceを0に設定
+		distance := 0
+		c.Set(chair.ID, DistanceModel{
+			Distance: distance,
+			UpdatedAt: time.Now(),
+		}, cache.DefaultExpiration)
+	} else {
+		distance := calculateDistance(prevCoordinate.Latitude, prevCoordinate.Longitude, req.Latitude, req.Longitude)
+		// 計算した距離をキャッシュに保存
+		c.Set(chair.ID, DistanceModel{
+			Distance: distance,
+			UpdatedAt: prevCoordinate.CreatedAt,
+		}, cache.DefaultExpiration)
 	}
 
 	location := &ChairLocation{}
